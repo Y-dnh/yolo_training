@@ -238,3 +238,4 @@ ehthumbs.db
 # Великі датасети (якщо вони зберігаються локально в папці проекту)
 dataset/
 yolov8x-p2_for_autolabelling/
+dataset_split/

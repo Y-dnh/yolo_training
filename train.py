@@ -133,6 +133,24 @@ TRAINING_CONFIG = {
 }
 
 
+# =============================================================================
+# КОНФІГУРАЦІЯ ЕКСПОРТУ ONNX (після навчання)
+# Підтримувані параметри для ONNX: imgsz, half, dynamic, simplify, opset, nms, batch, device
+# Документація: https://docs.ultralytics.com/modes/export/#arguments
+# =============================================================================
+EXPORT_CONFIG = {
+    "format": "onnx",
+    "imgsz": 960,               # Розмір входу (має відповідати imgsz з навчання)
+    "half": False,              # FP16 - зменшує розмір, прискорює інференс на GPU
+    "dynamic": True,            # Динамічний розмір входу при інференсі
+    "simplify": True,           # Спрощення графу через onnxslim
+    "opset": None,              # ONNX opset версія (None = остання, 11-13 для сумісності)
+    "nms": False,               # Вбудувати NMS в модель
+    "batch": 1,                 # Batch size
+    "device": None,             # None = авто, 0 = GPU, "cpu" = CPU
+}
+
+
 def setup_seed(seed: int) -> None:
     """Ініціалізація seed для відтворюваності результатів."""
     random.seed(seed)
@@ -193,7 +211,52 @@ def train_model(
     print("Навчання завершено!")
     print(f"Найкраща модель збережена: {trained_model_path}")
     
-    return results, trained_model_path
+    # Експорт моделі в ONNX
+    onnx_path = export_model_after_training(trained_model_path)
+        
+    return results, trained_model_path, onnx_path
+
+
+def export_model_after_training(
+    model_path: str,
+    export_config: dict = None
+) -> str | None:
+    """
+    Експорт моделі після навчання.
+    
+    Args:
+        model_path: Шлях до навченої моделі (.pt)
+        export_config: Конфігурація експорту (за замовчуванням EXPORT_CONFIG)
+    
+    Returns:
+        str | None: Шлях до експортованої моделі або None при помилці
+    """
+    if export_config is None:
+        export_config = EXPORT_CONFIG.copy()
+    
+    # Фільтруємо None значення
+    config = {k: v for k, v in export_config.items() if v is not None}
+    
+    print("\n" + "=" * 60)
+    print("ЕКСПОРТ МОДЕЛІ")
+    print("=" * 60)
+    print(f"Модель: {model_path}")
+    print(f"Формат: {config.get('format', 'onnx')}")
+    print(f"Розмір зображення: {config.get('imgsz', 640)}")
+    print(f"Динамічний вхід: {config.get('dynamic', False)}")
+    print(f"FP16: {config.get('half', False)}")
+    print(f"INT8: {config.get('int8', False)}")
+    print("=" * 60)
+    
+    try:
+        model = YOLO(model_path)
+        exported_path = model.export(**config)
+        print(f"\nЕкспорт завершено успішно!")
+        print(f"Файл збережено: {exported_path}")
+        return exported_path
+    except Exception as e:
+        print(f"\nПомилка під час експорту: {e}")
+        return None
 
 
 def main():
@@ -208,9 +271,9 @@ def main():
     training_kwargs = {"device": 0 if device == "cuda" else "cpu"}
     
     # Запуск навчання
-    results, model_path = train_model(**training_kwargs)
+    results, model_path, onnx_path = train_model(**training_kwargs)
     
-    return results, model_path
+    return results, model_path, onnx_path
 
 
 if __name__ == "__main__":
