@@ -1,6 +1,6 @@
 # YOLO IR Detection Training Pipeline
 
-A complete pipeline for training YOLO models. This project includes tools for COCO to YOLO format conversion, dataset preparation, and model training/validation.
+A complete pipeline for training YOLO models. This project includes tools for COCO to YOLO format conversion, dataset preparation, model training/validation, and export to various formats.
 
 ## 📋 Table of Contents
 
@@ -12,6 +12,7 @@ A complete pipeline for training YOLO models. This project includes tools for CO
   - [2. Prepare Dataset](#2-prepare-dataset)
   - [3. Train Model](#3-train-model)
   - [4. Validate Model](#4-validate-model)
+  - [5. Export Model](#5-export-model)
 - [Configuration](#configuration)
 - [Dataset Structure](#dataset-structure)
 - [Training Parameters](#training-parameters)
@@ -34,14 +35,23 @@ A complete pipeline for training YOLO models. This project includes tools for CO
 
 - **Validation Tools**: Model validation and performance evaluation
 
+- **Model Export**: Export trained models to various formats:
+  - ONNX (universal, CPU/GPU)
+  - TensorRT (NVIDIA GPU optimization)
+  - TFLite (mobile/edge devices)
+  - OpenVINO (Intel CPU/GPU)
+  - CoreML (Apple devices)
+  - And more (NCNN, MNN, PaddlePaddle, etc.)
+
 ## 📁 Project Structure
 
 ```
 project/
 ├── coco_to_yolo.py          # COCO format converter
 ├── prepare_dataset.py       # Dataset splitting tool
-├── train.py                 # Training script
+├── train.py                 # Training script (+ auto ONNX export)
 ├── validate.py              # Validation script
+├── export.py                # Model export (all formats)
 ├── requirements.txt         # Python dependencies
 ├── dataset/                 # Source data (create this)
 │   ├── images/
@@ -61,6 +71,7 @@ project/
     └── baseline/
         ├── weights/
         │   ├── best.pt
+        │   ├── best.onnx      # Auto-exported after training
         │   └── last.pt
         └── results.png
 ```
@@ -156,11 +167,29 @@ python train.py
 
 **Key Configuration** (edit in `train.py`):
 
+```python
+TRAINING_CONFIG = {
+    "epochs": 100,
+    "batch": 4,
+    "imgsz": 960,
+    # ... інші параметри
+}
+
+# Автоматичний експорт в ONNX після навчання
+EXPORT_CONFIG = {
+    "format": "onnx",
+    "imgsz": 960,
+    "dynamic": True,
+    "simplify": True,
+    # ...
+}
+```
+
 Training outputs:
 - Best model: `PROJECT_NAME/baseline/weights/best.pt`
+- ONNX model: `PROJECT_NAME/baseline/weights/best.onnx` (auto-exported)
 - Last model: `PROJECT_NAME/baseline/weights/last.pt`
 - Training plots: `PROJECT_NAME/baseline/results.png`
-- Logs: `PROJECT_NAME/baseline/`
 
 ### 4. Validate Model
 
@@ -171,4 +200,61 @@ python validate.py
 ```
 
 **Configuration** (edit in `validate.py`):
+
+```python
+VALIDATION_CONFIG = {
+    "conf": 0.5,
+    "iou": 0.5,
+    "imgsz": 576,
+    "split": "test",
+    # ...
+}
+```
+
+### 5. Export Model
+
+Export trained model to various formats for deployment:
+
+```python
+python export.py
+```
+
+**Configuration** (edit in `export.py`):
+
+```python
+EXPORT_CONFIG = {
+    "format": "onnx",       # onnx, engine, tflite, openvino, coreml, etc.
+    "imgsz": 960,
+    "half": False,          # FP16 quantization
+    "int8": False,          # INT8 quantization (needs calibration data)
+    "dynamic": True,        # Dynamic input size
+    "simplify": True,       # Simplify ONNX graph
+    # ...
+}
+```
+
+**Supported export formats:**
+
+| Format | Argument | Use Case |
+|--------|----------|----------|
+| ONNX | `onnx` | Universal, CPU/GPU inference |
+| TensorRT | `engine` | NVIDIA GPU (up to 5x speedup) |
+| OpenVINO | `openvino` | Intel CPU/GPU (up to 3x speedup) |
+| TFLite | `tflite` | Mobile/Edge devices |
+| CoreML | `coreml` | Apple devices (macOS/iOS) |
+| NCNN | `ncnn` | Mobile/Embedded (ARM) |
+| TorchScript | `torchscript` | PyTorch deployment |
+
+**Programmatic usage:**
+
+```python
+from export import export_model
+
+# Default export (uses EXPORT_CONFIG)
+export_model()
+
+# Custom export
+export_model(format="engine", half=True)  # TensorRT FP16
+export_model(format="tflite", int8=True, data="yolo.yaml")  # TFLite INT8
+```
 
