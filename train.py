@@ -10,6 +10,7 @@
 
 import os
 import sys
+import re
 
 # Фікс для правильного відображення tqdm у Windows PowerShell
 if sys.platform == 'win32':
@@ -38,6 +39,14 @@ SEED = 42
 # --- YOLO конфіг ---
 PROJECT_NAME = "yolo11x_for_autolabelling"
 PRETRAINED_MODEL = "D:/projects_yaroslav/yolo_training/yolo11x_for_autolabelling/baseline/weights/last.pt"
+
+# --- Transfer Learning для YAML моделей (P2/P6 та інші кастомні архітектури) ---
+# Якщо True і model_path є .yaml файл — автоматично завантажить базові ваги (.pt)
+# Наприклад: yolov8s-p2.yaml → завантажить ваги з yolov8s.pt
+#            yolo11m-p2.yaml → завантажить ваги з yolo11m.pt
+#            yolo26-p6.yaml  → завантажить ваги з yolo26.pt
+# Шари з невідповідними розмірами (detection heads) будуть пропущені автоматично.
+YAML_TRANSFER_LEARNING = True
 
 # --- RT-DETR конфіг (розкоментувати при MODEL_TYPE = "rtdetr") ---
 # PROJECT_NAME = "rtdetr-x_for_autolabelling"
@@ -208,13 +217,56 @@ def validate_model_type() -> None:
         )
 
 
+def _derive_base_weights(yaml_name: str) -> str:
+    """
+    Визначає назву файлу базових ваг із назви YAML-файлу.
+    Видаляє відомі суфікси архітектури/задачі і замінює .yaml на .pt.
+    
+    Підтримувані суфікси (та їх комбінації):
+        -p2, -p6          — додаткові detection heads
+        -obb              — Oriented Bounding Boxes
+        -seg              — Instance Segmentation
+        -pose             — Pose Estimation
+        -cls              — Classification
+        -world, -worldv2  — YOLO-World
+    
+    Приклади:
+        yolov8s-p2.yaml   → yolov8s.pt
+        yolov8x-p2.yaml   → yolov8x.pt
+        yolo11m-p2.yaml   → yolo11m.pt
+        yolo26-p6.yaml    → yolo26.pt
+        yolo26s-obb.yaml  → yolo26s.pt
+        yolo26x-obb.yaml  → yolo26x.pt
+        yolov8n-seg.yaml  → yolov8n.pt
+        yolov8s-pose.yaml → yolov8s.pt
+        yolov8s-p2-seg.yaml → yolov8s.pt
+        yolov8s-worldv2.yaml → yolov8s.pt
+    
+    Args:
+        yaml_name: Назва YAML файлу (без шляху)
+    
+    Returns:
+        Назва файлу базових ваг (.pt)
+    """
+    # Видаляємо розширення .yaml
+    stem = yaml_name.replace(".yaml", "")
+    # Видаляємо відомі суфікси: -p2, -p6, -obb, -seg, -pose, -cls, -world, -worldv2
+    # Підтримуються комбінації: -p2-seg, -p2-obb тощо
+    base_stem = re.sub(r"(?:-(?:p\d+|obb|seg|pose|cls|world(?:v\d+)?))+$", "", stem)
+    return f"{base_stem}.pt"
+
+
 def load_model(model_path: str):
     """
     Завантаження моделі відповідно до MODEL_TYPE.
-    Автоматично визначає тип, якщо в шляху є 'rtdetr'.
+    
+    Transfer Learning (YAML_TRANSFER_LEARNING=True):
+        Якщо model_path є .yaml файл — створює архітектуру з YAML,
+        автоматично визначає базові ваги та завантажує їх через model.load().
+        Шари з невідповідними розмірами (detection heads P2/P6) пропускаються.
     
     Args:
-        model_path: Шлях до моделі або назва архітектури
+        model_path: Шлях до моделі або назва архітектури (.pt або .yaml)
     
     Returns:
         Завантажена модель (YOLO або RTDETR)
@@ -224,12 +276,42 @@ def load_model(model_path: str):
     """
     validate_model_type()
 
+    # RT-DETR — завжди стандартне завантаження
     if MODEL_TYPE == "rtdetr" or "rtdetr" in model_path.lower():
         print(f"[Model] Завантаження RT-DETR: {model_path}")
         return RTDETR(model_path)
-    else:
-        print(f"[Model] Завантаження YOLO: {model_path}")
-        return YOLO(model_path)
+
+    # YOLO з YAML + Transfer Learning
+    if model_path.lower().endswith(".yaml") and YAML_TRANSFER_LEARNING:
+        yaml_name = os.path.basename(model_path)
+        base_weights = _derive_base_weights(yaml_name)
+
+        print(f"[Model] Transfer Learning режим:")
+        print(f"  Архітектура (YAML): {model_path}")
+        print(f"  Базові ваги:        {base_weights}")
+
+        # 1. Ініціалізуємо структуру моделі з YAML
+        model = YOLO(model_path)
+
+        # 2. Завантажуємо базові ваги (matching шари)
+        #    model.load() автоматично пропускає шари з невідповідними розмірами
+        #    і виводить WARNING для кожного пропущеного шару
+        try:
+            model.load(base_weights)
+            print(f"[Model] ✅ Базові ваги '{base_weights}' завантажено успішно!")
+            print(f"[Model]    Шари з невідповідними розмірами (heads) пропущені автоматично.")
+        except FileNotFoundError:
+            print(f"[Model] ⚠️ Файл ваг '{base_weights}' не знайдено!")
+            print(f"[Model]    Модель буде навчатися з нуля (random init).")
+        except Exception as e:
+            print(f"[Model] ⚠️ Помилка при завантаженні ваг '{base_weights}': {e}")
+            print(f"[Model]    Модель буде навчатися з нуля (random init).")
+
+        return model
+
+    # Стандартне завантаження .pt або .yaml без transfer learning
+    print(f"[Model] Завантаження YOLO: {model_path}")
+    return YOLO(model_path)
 
 
 def filter_config(config: dict, excluded_keys: set) -> dict:
